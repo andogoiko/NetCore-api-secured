@@ -4,10 +4,15 @@ using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.Extensions.Options;
 using Microsoft.IdentityModel.Tokens;
 using Microsoft.OpenApi.Models;
+using apiSecurizada.Models;
 using Swashbuckle.AspNetCore.Swagger;
 using Swashbuckle.AspNetCore.SwaggerGen;
-
-
+using Newtonsoft.Json.Serialization;
+using Pomelo.EntityFrameworkCore.MySql.Infrastructure;
+using Microsoft.AspNetCore.Hosting;
+using Microsoft.Extensions.Hosting;
+using Microsoft.EntityFrameworkCore;
+using Middlewares;
 
 
 var builder = WebApplication.CreateBuilder(args);
@@ -15,11 +20,16 @@ var config = builder.Configuration;
 
 // Add services to the container.
 
+builder.Services.AddDbContext<BBDDContext>(options =>
+            options.UseMySql(
+                builder.Configuration.GetConnectionString("BBDD"),
+                new MySqlServerVersion(new Version(8, 0, 23))));
+
 builder.Services.AddControllers();
 // Learn more about configuring Swagger/OpenAPI at https://aka.ms/aspnetcore/swashbuckle
 builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddHttpContextAccessor();
-builder.Services.AddScoped<IUserService, UserService>();
+//builder.Services.AddScoped<IUserService, UserService>();
 builder.Services.AddSwaggerGen();
 
 builder.Services.AddTransient<IConfigureOptions<SwaggerGenOptions>, ConfigureSwaggerOptions>();
@@ -31,8 +41,8 @@ builder.Services.AddAuthentication(x =>
     x.DefaultScheme = JwtBearerDefaults.AuthenticationScheme;
 }).AddJwtBearer(x => 
     x.TokenValidationParameters = new TokenValidationParameters{
-        ValidIssuer = config["JwtSettings:Issuer"],
-        ValidAudience = config["JwtSettings:Audience"],
+        ValidIssuer = "https://id.ProbandoAuth.com",
+        ValidAudience = "https://swagger.ProbandoAuth.com",
         IssuerSigningKey = new SymmetricSecurityKey (Encoding.UTF8.GetBytes(config["JwtSettings:Key"]!)),
         ValidateIssuer = true,
         ValidateAudience = true,
@@ -45,7 +55,7 @@ builder.Services.AddAuthorization(options => {
         p.RequireClaim(IdentityData.AdminUserClaimName, "true"));
 });
 
-// Configuración del servicio CORS
+// ENABLE CORS to accept request from other domains
 builder.Services.AddCors(options =>
 {
     options.AddDefaultPolicy(builder =>
@@ -59,6 +69,10 @@ builder.Services.AddCors(options =>
 builder.Services.AddAntiforgery(options => options.HeaderName = "X-CSRF-TOKEN"); //servicio contra el csrf
 
 var app = builder.Build();
+
+//add the authorize on every request
+
+app.UseMiddleware<AuthorizationHeaderMiddleware>();
 
 // Configure the HTTP request pipeline.
 if (app.Environment.IsDevelopment())
@@ -75,7 +89,7 @@ app.Use(async (context, next) =>
     var antiforgery = context.RequestServices.GetRequiredService<IAntiforgery>();
     var tokens = antiforgery.GetAndStoreTokens(context);
     context.Response.Cookies.Append("XSRF-TOKEN", tokens.RequestToken,
-        new CookieOptions() { HttpOnly = false });
+        new CookieOptions() { HttpOnly = true });
     await next(); 
 });
 
@@ -83,6 +97,7 @@ app.UseHttpsRedirection();
 
 app.UseAuthentication();
 
+// ENABLE CORS to accept request from other domains
 app.UseCors(builder =>
 {
     builder.AllowAnyOrigin()
